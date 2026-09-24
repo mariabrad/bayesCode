@@ -2,7 +2,7 @@
 
 This project estimates per-voxel tissue mixture weights (`W`) and shared tissue-compartment spectra (`C`) from simulated diffusion-relaxation MRI signals.
 
-The signal model uses diffusion coefficients (`D`), T2 relaxation times, a Dirichlet prior on voxel mixture weights, and SVD compression of the forward model before optimisation.
+The signal model uses diffusion coefficients (`D`), T2 relaxation times, a Dirichlet prior on voxel mixture weights and SVD compression of the forward model before optimisation.
 
 ## Getting started
 
@@ -20,7 +20,7 @@ python3 -m pytest tests/ -q
 
 ## Notebooks
 
-- `demo_pipeline.ipynb` is the main walkthrough. It builds synthetic data, runs the optimiser, compares ground-truth, least-squares, and NNLS initialisation, and explores sensitivity to `alpha`, `M0`, and `sigma2`.
+- `demo_pipeline.ipynb` is the main walkthrough. It builds synthetic data, runs the optimiser, compares ground-truth, least-squares and NNLS initialisation + explores sensitivity to `alpha`, `M0` and `sigma2`.
 - `testing_nnls_madco.ipynb` compares NNLS and MADCO spectrum initialisation. MADCO is more computationally expensive because it solves a constrained fit for each selected voxel.
 - `testing_w_convergence.ipynb` plots how the voxel weights `W` change over optimisation iterations.
 
