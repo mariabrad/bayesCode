@@ -76,7 +76,7 @@ def plot_compartment_comparison(C_true, C_est, K, nD, nT2, D_vals, T2_vals):
 
 def plot_voxel_grid_comparison(
     C_a, W_a, C_b, W_b, K, n_voxels, nD, nT2,
-    n_show_per_block=20, label_a="True", label_b="Est",
+    n_show_per_block=5, label_a="True", label_b="Est",
 ):
     assert C_a.shape == C_b.shape == (nD * nT2, K), \
         f"C_a and C_b must be full-grid ({nD * nT2}, {K}), got {C_a.shape} and {C_b.shape}"
