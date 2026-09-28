@@ -14,10 +14,16 @@ def create_A_matrix(D_grid, T2_grid, minB, maxB, nB, minTE, maxTE, nTE):
     b_vals = np.linspace(minB, maxB, nB)
     TE_vals = np.linspace(minTE, maxTE, nTE)
     B_mesh, TE_mesh = np.meshgrid(b_vals, TE_vals, indexing="ij")
-    b_list = B_mesh.ravel()
-    TE_list = TE_mesh.ravel()
+    return create_A_matrix_from_acquisition(D_grid, T2_grid, B_mesh.ravel(), TE_mesh.ravel())
 
-    A = np.exp(-np.outer(b_list, D_grid)) * np.exp(-np.outer(TE_list, 1 / T2_grid))
+
+def create_A_matrix_from_acquisition(D_grid, T2_grid, b_values, TE_values):
+    """Build a forward matrix for arbitrary paired b/TE measurements."""
+    b_values = np.asarray(b_values, dtype=float).ravel()
+    TE_values = np.asarray(TE_values, dtype=float).ravel()
+    if b_values.shape != TE_values.shape:
+        raise ValueError("b_values and TE_values must have the same shape")
+    A = np.exp(-np.outer(b_values, D_grid)) * np.exp(-np.outer(TE_values, 1 / T2_grid))
     return A
 
 
