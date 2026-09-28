@@ -555,6 +555,58 @@ def define_initial_C_NNLS(Y, A, voxel_idx, K, D_vals, T2_vals,
     return C_new_gauss
 
 
+def define_initial_C_NNLS_mean(Y, A, voxel_idx, K, D_vals, T2_vals,
+                          Dmin, Dmax, T2min, T2max, nD, nT2, seed=0,
+                          return_diagnostics=False):
+
+    # Average the signals over voxels first, then solve one NNLS on the average
+    y_mean = Y[:, list(voxel_idx)].mean(axis=1)
+    tissue_spectrum, _ = _solve_nnls(A, y_mean)
+    tissue_spectrum /= tissue_spectrum.sum()
+    F_tissue = tissue_spectrum.reshape(nD, nT2)
+
+    D_mesh, T2_mesh = np.meshgrid(D_vals, T2_vals, indexing='ij')
+    grid_points = np.column_stack([
+        (D_mesh.ravel() - Dmin) / (Dmax - Dmin),
+        (T2_mesh.ravel() - T2min) / (T2max - T2min),
+    ])
+    kmeans = KMeans(n_clusters=K, n_init=10, random_state=seed)
+    kmeans.fit(grid_points, sample_weight=tissue_spectrum)
+    labels = kmeans.labels_.reshape(nD, nT2)
+
+    D_step = D_vals[1] - D_vals[0]
+    T2_step = T2_vals[1] - T2_vals[0]
+    n_grid = nD * nT2
+    C_new_gauss = np.zeros((n_grid, K))
+    compartment_centers = []
+    compartment_widths = []
+    GD, GT2 = np.meshgrid(D_vals, T2_vals, indexing='ij')
+    for i in range(K):
+        idxD, idxT2 = np.nonzero(labels == i)
+        w = F_tissue[idxD, idxT2]
+        if w.sum() <= 0 or len(idxD) == 0:
+            # fall back to a broad default (avoids divide-by-zero)
+            D_c, T2_c = Dmin + (Dmax - Dmin) / 2, T2min + (T2max - T2min) / 2
+            sD, sT2 = (Dmax - Dmin) / 4, (T2max - T2min) / 4
+        else:
+            D_c = np.sum(D_vals[idxD] * w) / w.sum()
+            T2_c = np.sum(T2_vals[idxT2] * w) / w.sum()
+            sD = np.sqrt(np.sum(w * (D_vals[idxD] - D_c) ** 2) / w.sum())
+            sT2 = np.sqrt(np.sum(w * (T2_vals[idxT2] - T2_c) ** 2) / w.sum())
+            sD = max(sD, D_step)      # floor to at least one grid step
+            sT2 = max(sT2, T2_step)
+        compartment_centers.append((D_c, T2_c))
+        compartment_widths.append((sD, sT2))
+
+        blob = np.exp(-0.5 * ((GD - D_c) / sD) ** 2) * np.exp(-0.5 * ((GT2 - T2_c) / sT2) ** 2)
+        C_new_gauss[:, i] = blob.ravel() / blob.sum()
+
+    if return_diagnostics:
+        return C_new_gauss, tissue_spectrum, labels, compartment_centers, compartment_widths
+    return C_new_gauss
+
+
+
 def project_C_to_C_small(C, s, V_mat):
     """Project physical canonical spectra into retained SVD coordinates."""
     C = np.asarray(C, dtype=float)
