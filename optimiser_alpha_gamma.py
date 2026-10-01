@@ -498,13 +498,16 @@ def define_initial_C_small(Y, U, W, M0, K):
 
 def define_initial_C_NNLS(Y, A, voxel_idx, K, D_vals, T2_vals,
                           Dmin, Dmax, T2min, T2max, nD, nT2, seed=0,
-                          return_diagnostics=False):
+                          return_diagnostics=False, min_fraction=0.0):
     """Build full-grid, physical canonical-spectrum initial values from NNLS.
 
     Voxelwise NNLS spectra are averaged, partitioned with weighted k-means,
     and represented by one normalized Gaussian D--T2 hotspot per component.
     This function intentionally has no SVD inputs: it returns ``C_init`` in
     the physical spectral grid, with shape ``(nD * nT2, K)``.
+
+    Grid cells below ``min_fraction`` of the mean spectrum's maximum are set
+    to zero before clustering (0 keeps everything).
     """
     spectra = []
     for v in voxel_idx:
@@ -512,6 +515,9 @@ def define_initial_C_NNLS(Y, A, voxel_idx, K, D_vals, T2_vals,
         spectra.append(f / f.sum() if f.sum() > 0 else f)
     tissue_spectrum = np.mean(spectra, axis=0)
     tissue_spectrum /= tissue_spectrum.sum()
+    if min_fraction > 0:
+        tissue_spectrum[tissue_spectrum < min_fraction * tissue_spectrum.max()] = 0
+        tissue_spectrum /= tissue_spectrum.sum()
     F_tissue = tissue_spectrum.reshape(nD, nT2)
 
     D_mesh, T2_mesh = np.meshgrid(D_vals, T2_vals, indexing='ij')
@@ -557,12 +563,16 @@ def define_initial_C_NNLS(Y, A, voxel_idx, K, D_vals, T2_vals,
 
 def define_initial_C_NNLS_mean(Y, A, voxel_idx, K, D_vals, T2_vals,
                           Dmin, Dmax, T2min, T2max, nD, nT2, seed=0,
-                          return_diagnostics=False):
+                          return_diagnostics=False, min_fraction=0.0):
 
     # Average the signals over voxels first, then solve one NNLS on the average
     y_mean = Y[:, list(voxel_idx)].mean(axis=1)
     tissue_spectrum, _ = _solve_nnls(A, y_mean)
     tissue_spectrum /= tissue_spectrum.sum()
+    if min_fraction > 0:
+        # cells below min_fraction of the maximum are set to zero before clustering
+        tissue_spectrum[tissue_spectrum < min_fraction * tissue_spectrum.max()] = 0
+        tissue_spectrum /= tissue_spectrum.sum()
     F_tissue = tissue_spectrum.reshape(nD, nT2)
 
     D_mesh, T2_mesh = np.meshgrid(D_vals, T2_vals, indexing='ij')
