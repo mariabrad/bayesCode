@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from optimiser_alpha_gamma import define_initial_C_NNLS, initialize_M0_monoexponential
+from .optimiser_alpha_gamma import define_initial_C_NNLS, initialize_M0_monoexponential
 
 
 class SignalModel(ABC):

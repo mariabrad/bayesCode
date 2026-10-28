@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
-from optimiser_alpha_gamma import *
-from optimiser_alpha_gamma import _c_grid_regularization
-from create_grid import (
+from src.optimiser_alpha_gamma import *
+from src.optimiser_alpha_gamma import _c_grid_regularization
+from src.create_grid import (
     create_DT2_grid, create_A_matrix, apply_SVD_to_A,
     create_gaussian_compartments, create_W_true, create_M0_true, create_signal,
 )
-from plotting import *
+from src.metrics import matched_errors
 
 TRUE_D_MEANS = [0.4, 0.9, 1.6]
 

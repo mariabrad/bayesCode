@@ -1,20 +1,20 @@
 import numpy as np
 import pytest
 
-from create_grid import (
+from src.create_grid import (
     apply_SVD_to_A,
     create_A_matrix,
     create_DT2_grid,
     create_gaussian_compartments,
     create_signal,
 )
-from optimiser_alpha_gamma import (
+from src.optimiser_alpha_gamma import (
     _W_objective_and_gradient,
     _constrained_C_objective_and_gradient,
     update_C_constrained,
     update_W,
 )
-from optimiser_alpha_gamma import (
+from src.optimiser_alpha_gamma import (
     define_initial_C_small_NNLS,
     define_initial_W_and_m,
     estimate_C,

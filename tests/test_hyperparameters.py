@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from optimiser_alpha_gamma import (
+from src.optimiser_alpha_gamma import (
     update_alpha,
     update_lambda,
     update_sigma2,

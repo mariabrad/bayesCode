@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from metrics import dominant_peak_grid_error, m0_mae, voxelwise_spectrum_mae
+from src.metrics import dominant_peak_grid_error, m0_mae, voxelwise_spectrum_mae
 
 
 def test_voxelwise_spectrum_mae_and_m0_mae():

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from create_grid import (
+from src.create_grid import (
     create_DT2_grid,
     create_A_matrix,
     create_A_matrix_from_acquisition,

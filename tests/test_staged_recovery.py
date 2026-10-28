@@ -7,7 +7,7 @@ parameterization and alternating updates are being debugged.
 import numpy as np
 import pytest
 
-from create_grid import (
+from src.create_grid import (
     apply_SVD_to_A,
     create_A_matrix,
     create_DT2_grid,
@@ -16,7 +16,7 @@ from create_grid import (
     create_gaussian_compartments,
     create_signal,
 )
-from optimiser_alpha_gamma import (
+from src.optimiser_alpha_gamma import (
     _lowest_b_data,
     define_initial_C_small,
     define_initial_W_and_m,

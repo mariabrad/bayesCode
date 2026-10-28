@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from postprocessing import find_spectral_peaks, threshold_spectrum
+from src.postprocessing import find_spectral_peaks, threshold_spectrum
 
 
 def test_threshold_spectrum_removes_weak_mass_and_normalizes():

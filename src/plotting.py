@@ -1,77 +1,17 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import linear_sum_assignment
 
 
-def matched_errors(C_small_true, C_small_est, W_true, W_est):
-    K = C_small_true.shape[1]
-    C_small_m, W_m = match_components(C_small_true, C_small_est, W_true, W_est, K)
-    W_mae = np.mean(np.abs(W_m - W_true))
-    C_mae = np.mean(np.abs(C_small_m - C_small_true))
-    return W_mae, C_mae
+def plot_compartment_comparison_nomatch(C_true, C_est, model):
+    """True (top row) vs estimated (bottom row) compartments, in the order given."""
+    show_canonical_spectra([("True", C_true), ("Estimated", C_est)], model, colorbar=True)
 
 
-def match_components(C_small_true, C_small_est, W_true, W_est, K):
-    cost = np.zeros((K, K))
-    for i in range(K):
-        for j in range(K):
-            cost[i, j] = np.sum((C_small_true[:, i] - C_small_est[:, j]) ** 2)
-    true_idx, est_idx = linear_sum_assignment(cost)
-    order = est_idx[np.argsort(true_idx)]
-    return C_small_est[:, order], W_est[order, :]
-
-
-def plot_compartment_comparison_nomatch(C_true, C_est, K, nD, nT2, D_vals, T2_vals):
-    fig, axes = plt.subplots(2, K, figsize=(4 * K, 8))
-    for k in range(K):
-        for row, C, label in zip(
-            [0, 1],
-            [C_true, C_est],
-            ["True", "Estimated"],
-        ):
-            im = axes[row, k].imshow(
-                C[:, k].reshape(nD, nT2),
-                origin="lower",
-                aspect="auto",
-                extent=[T2_vals.min(), T2_vals.max(), D_vals.min(), D_vals.max()],
-            )
-            axes[row, k].set_title(f"{label} compartment {k+1}")
-            axes[row, k].set_xlabel("T2")
-            axes[row, k].set_ylabel("D")
-            plt.colorbar(im, ax=axes[row, k])
-
-    plt.tight_layout()
-    plt.show()
-
-
-
-def plot_compartment_comparison(C_true, C_est, K, nD, nT2, D_vals, T2_vals):
-    true_order = np.argsort([np.argmax(C_true[:, k]) for k in range(K)])
-    est_order = np.argsort([np.argmax(C_est[:, k]) for k in range(K)])
-
-    C_true_matched = C_true[:, true_order]
-    C_est_matched = C_est[:, est_order]
-
-    fig, axes = plt.subplots(2, K, figsize=(4 * K, 8))
-    for k in range(K):
-        for row, C, label in zip(
-            [0, 1],
-            [C_true_matched, C_est_matched],
-            ["True", "Estimated"],
-        ):
-            im = axes[row, k].imshow(
-                C[:, k].reshape(nD, nT2),
-                origin="lower",
-                aspect="auto",
-                extent=[T2_vals.min(), T2_vals.max(), D_vals.min(), D_vals.max()],
-            )
-            axes[row, k].set_title(f"{label} compartment {k+1}")
-            axes[row, k].set_xlabel("T2")
-            axes[row, k].set_ylabel("D")
-            plt.colorbar(im, ax=axes[row, k])
-
-    plt.tight_layout()
-    plt.show()
+def plot_compartment_comparison(C_true, C_est, model):
+    """Same as above, but each set is first sorted by where its peak is on the grid."""
+    true_order = np.argsort(np.argmax(C_true, axis=0))
+    est_order = np.argsort(np.argmax(C_est, axis=0))
+    plot_compartment_comparison_nomatch(C_true[:, true_order], C_est[:, est_order], model)
 
 
 def plot_voxel_grid_comparison(
@@ -151,91 +91,88 @@ def plot_loss_curve(losses):
 
 
 def plot_init_diagnostics(
-    tissue_spectrum, labels, compartment_centers, K, nD, nT2, D_vals, T2_vals,
+    tissue_spectrum, labels, compartment_centers, K, model,
     D_means=None, T2_means=None, compartment_widths=None, C_new_gauss=None,
     method_label="",
 ):
     """
-    Diagnostic plots for a clustering-based C_small initializer (e.g.
-    define_initial_C_small_NNLS / define_initial_C_small_MADCO), built from
+    Diagnostic plots for a clustering-based initializer (e.g.
+    define_initial_C_NNLS / define_initial_C_small_MADCO), built from
     that function's return_diagnostics=True outputs. Shows: the averaged
     tissue spectrum, the K-means regions, the detected vs. true compartment
     centres, and (if compartment_widths/C_new_gauss are given) the fitted
-    Gaussian compartments themselves.
+    Gaussian compartments themselves. Centres are (D, T2) pairs.
     """
     suffix = f" ({method_label})" if method_label else ""
+    xlabel, ylabel = model.labels
+
+    def show(image, title):
+        im = plt.imshow(image.reshape(model.shape), origin="lower", aspect="auto", extent=model.extent)
+        plt.xlabel(xlabel); plt.ylabel(ylabel); plt.title(title + suffix)
+        return im
 
     # 1. averaged tissue spectrum
-    plt.imshow(tissue_spectrum.reshape(nD, nT2).T, origin="lower", aspect="auto",
-               extent=[D_vals[0], D_vals[-1], T2_vals[0], T2_vals[-1]])
+    show(tissue_spectrum, "Averaged tissue spectrum")
     if D_means is not None and T2_means is not None:
         for d, t2 in zip(D_means, T2_means):
-            plt.plot(d, t2, "r+", markersize=15, markeredgewidth=2)
+            plt.plot(t2, d, "r+", markersize=15, markeredgewidth=2)
     plt.colorbar()
-    plt.title(f"Averaged tissue spectrum{suffix}")
     plt.show()
 
     # 2. K-means cluster regions
-    plt.imshow(labels.T, origin="lower", aspect="auto",
-               extent=[D_vals[0], D_vals[-1], T2_vals[0], T2_vals[-1]])
-    plt.title(f"K-means regions (K={K}){suffix}")
+    show(labels, f"K-means regions (K={K})")
     plt.show()
 
     # 3. spectrum with detected centres (red) vs true means (white)
-    im = plt.imshow(tissue_spectrum.reshape(nD, nT2).T, origin="lower", aspect="auto",
-                     extent=[D_vals[0], D_vals[-1], T2_vals[0], T2_vals[-1]])
+    im = show(tissue_spectrum, "Detected centres (red) vs true (white)")
     for d, t2 in compartment_centers:
-        plt.plot(d, t2, "r+", markersize=15, markeredgewidth=2)
+        plt.plot(t2, d, "r+", markersize=15, markeredgewidth=2)
     if D_means is not None and T2_means is not None:
         for d, t2 in zip(D_means, T2_means):
-            plt.plot(d, t2, "w+", markersize=15, markeredgewidth=2)
+            plt.plot(t2, d, "w+", markersize=15, markeredgewidth=2)
     plt.colorbar(im)
-    plt.title(f"Detected centres (red) vs true (white){suffix}")
     plt.show()
 
     # 4. fitted Gaussian compartments themselves, if provided
     if compartment_widths is not None and C_new_gauss is not None:
         fig, axes = plt.subplots(1, K, figsize=(4 * K, 4))
         for i, ax in enumerate(axes):
-            ax.imshow(C_new_gauss[:, i].reshape(nD, nT2).T, origin="lower", aspect="auto",
-                      extent=[D_vals[0], D_vals[-1], T2_vals[0], T2_vals[-1]])
-            ax.plot(*compartment_centers[i], "r+", markersize=15, markeredgewidth=2)
+            ax.imshow(C_new_gauss[:, i].reshape(model.shape), origin="lower", aspect="auto",
+                      extent=model.extent)
+            d, t2 = compartment_centers[i]
+            ax.plot(t2, d, "r+", markersize=15, markeredgewidth=2)
             sD_i, sT2_i = compartment_widths[i]
             ax.set_title(f"Compartment {i+1}: sD={sD_i:.3f}, sT2={sT2_i:.1f}")
+            ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
         plt.tight_layout()
         plt.show()
 
 
-def show_canonical_spectra(items, model):
+def show_canonical_spectra(items, model, fs=None, colorbar=False, save_path=None):
+    """One row per (title, C) in items, one column per compartment.
+    For a poster version, pass fs (font size), colorbar=True and save_path."""
     K = items[0][1].shape[1]
     xlabel, ylabel = model.labels
-    fig, axes = plt.subplots(len(items), K, figsize=(3*K, 3*len(items)), squeeze=False)
-    for row, (title, C) in enumerate(items):
-        for k in range(K):
-            axes[row, k].imshow(C[:, k].reshape(model.shape), origin='lower', aspect='auto',
-                                extent=model.extent)
-            axes[row, k].set_title(f'{title}, component {k+1}')
-            axes[row, k].set_xlabel(xlabel); axes[row, k].set_ylabel(ylabel)
-    plt.tight_layout()
-    plt.show()
+    fonts = {} if fs is None else {"font.size": fs, "axes.titlesize": fs + 2, "axes.labelsize": fs,
+                                   "xtick.labelsize": fs - 2, "ytick.labelsize": fs - 2}
+    size = 3 if fs is None else 6
 
+    with plt.rc_context(fonts):
+        fig, axes = plt.subplots(len(items), K, figsize=(size * 1.25 * K, size * len(items)),
+                                 squeeze=False, constrained_layout=True)
+        for row, (title, C) in enumerate(items):
+            for k in range(K):
+                image = axes[row, k].imshow(C[:, k].reshape(model.shape), origin='lower',
+                                            aspect='auto', extent=model.extent)
+                axes[row, k].set_title(f'{title} compartment {k+1}')
+                axes[row, k].set_xlabel(xlabel); axes[row, k].set_ylabel(ylabel)
+                if colorbar:
+                    fig.colorbar(image, ax=axes[row, k])
 
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.show()
 
-def order_components(C_true, C_est, W_est, K):
-    # Cost[i, j] = dissimilarity between true component i and estimated component j.
-    cost = np.array([
-    [np.mean((C_true[:, i] - C_est[:, j]) ** 2) for j in range(K)]
-    for i in range(K)
-    ])
-
-    true_indices, estimated_indices = linear_sum_assignment(cost)
-
-    # Put estimated components into the ground-truth component order.
-    order = estimated_indices[np.argsort(true_indices)]
-
-    C_est = C_est[:, order]
-    W_est = W_est[order, :]
-    return C_est, W_est
 
 def plot_voxel_spectra_and_weights(model, F_est, W_est, voxels,
                                    F_true=None, W_true=None, fs=28, save_path=None):

@@ -1,5 +1,5 @@
 import numpy as np
-from create_grid import create_W_true, create_M0_true, create_signal
+from .create_grid import create_W_true, create_M0_true, create_signal
 
 
 def gaussian_compartments(model, centres, widths):

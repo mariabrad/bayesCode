@@ -4,7 +4,7 @@ matplotlib.use("Agg")  # no display, so plt.show() never blocks
 import numpy as np
 import pytest
 
-from plotting import matched_errors, match_components
+from src.metrics import matched_errors, match_components
 
 
 def test_match_components_recovers_permutation():
