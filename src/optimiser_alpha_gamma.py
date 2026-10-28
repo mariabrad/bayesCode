@@ -617,6 +617,14 @@ def define_initial_C_NNLS_mean(Y, A, voxel_idx, K, D_vals, T2_vals,
 
 
 
+def apply_SVD_to_A(A, R):
+    U_full, s_full, Vt_full = np.linalg.svd(A, full_matrices=False)
+    U = U_full[:, :R]
+    s = s_full[:R]
+    V_mat = Vt_full[:R, :].T
+    return U, s, V_mat
+
+
 def project_C_to_C_small(C, s, V_mat):
     """Project physical canonical spectra into retained SVD coordinates."""
     C = np.asarray(C, dtype=float)

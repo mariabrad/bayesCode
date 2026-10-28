@@ -34,7 +34,7 @@ python3 -m pip install -r requirements.txt
 Run the test suite from the project directory:
 
 ```bash
-python3 -m pytest tests/ -q
+python3 -m pytest new_tests/ -q
 ```
 
 The code is imported as a package, e.g. `from src.signal_models import DiffusionT2Model`. In a notebook, add the repository root to the path first:
@@ -61,12 +61,10 @@ Run the notebooks in VS Code or Jupyter after installing the dependencies. The r
 src/
   signal_models.py          Signal models (grid + forward matrix A + starting values)
   simulation.py             Ground truth for simulations (compartments, weights, M0, noise)
-  optimiser_alpha_gamma.py  Bayesian optimiser and initialisation methods
-  create_grid.py            Older grid / forward-model helpers, and SVD of A
+  optimiser_alpha_gamma.py  Bayesian optimiser, initialisation methods and SVD of A
   plotting.py               Plots (take `model` for grid shape, axes and labels)
   metrics.py                Error measures and component matching
   postprocessing.py         Spectrum thresholding and peak finding
 notebooks/                  Analyses and the walkthrough
-tests/                      Automated tests
-pytest.ini                  Lets pytest find the `src` package
+new_tests/                  Automated tests (use the model and simulation code)
 ```

@@ -1,13 +1,9 @@
 import numpy as np
 import pytest
 
-from src.create_grid import (
-    apply_SVD_to_A,
-    create_A_matrix,
-    create_DT2_grid,
-    create_gaussian_compartments,
-    create_signal,
-)
+from src.optimiser_alpha_gamma import apply_SVD_to_A
+from src.signal_models import DiffusionT2Model
+from src.simulation import create_signal, gaussian_compartments
 from src.optimiser_alpha_gamma import (
     _W_objective_and_gradient,
     _constrained_C_objective_and_gradient,
@@ -21,6 +17,20 @@ from src.optimiser_alpha_gamma import (
     initialize_M0_monoexponential,
     run_constrained_optimisation,
 )
+
+
+def acquisition(minB, maxB, nB, minTE, maxTE, nTE):
+    """Every combination of nB b-values and nTE echo times, b-major (as the old create_A_matrix)."""
+    b = np.linspace(minB, maxB, nB)
+    TE = np.linspace(minTE, maxTE, nTE)
+    return {"b": np.repeat(b, nTE), "TE": np.tile(TE, nB)}
+
+
+def dt2_compartments(model, D_means, D_stds, T2_means, T2_stds):
+    """Gaussian compartments on the D-T2 grid (as the old create_gaussian_compartments)."""
+    centres = [{"D": d, "T2": t} for d, t in zip(D_means, T2_means)]
+    widths = [{"D": d, "T2": t} for d, t in zip(D_stds, T2_stds)]
+    return gaussian_compartments(model, centres, widths)
 
 
 def _finite_difference_gradient(objective, x, step=1e-6):
@@ -77,11 +87,11 @@ def test_weight_entropy_prior_promotes_dominant_simplex_weights():
 
 
 def test_constrained_c_update_preserves_simplex_and_improves_fit():
-    D_grid, T2_grid = create_DT2_grid(0.2, 2.0, 8, 20.0, 150.0, 8)
-    A = create_A_matrix(D_grid, T2_grid, 0.0, 4.0, 5, 20.0, 180.0, 5)
+    model = DiffusionT2Model(0.2, 2.0, 8, 20.0, 150.0, 8)
+    D_grid, T2_grid = model.D, model.T2
+    A = model.A(acquisition(0.0, 4.0, 5, 20.0, 180.0, 5))
     U, s, V_mat = apply_SVD_to_A(A, R=8)
-    C_true = create_gaussian_compartments(
-        D_grid, T2_grid, [0.4, 1.4], [0.1, 0.1], [90.0, 55.0], [10.0, 10.0]
+    C_true = dt2_compartments(model, [0.4, 1.4], [0.1, 0.1], [90.0, 55.0], [10.0, 10.0]
     )
     W = np.array([[0.8, 0.2, 0.5], [0.2, 0.8, 0.5]])
     M0 = np.ones(3)
@@ -142,12 +152,12 @@ def test_constrained_pipeline_recovers_finite_voxelwise_spectra_from_noisy_data(
     nD = nT2 = 8
     nB = nTE = 5
     K, n_voxels = 3, 12
-    D_grid, T2_grid = create_DT2_grid(0.2, 2.0, nD, 20.0, 150.0, nT2)
+    model = DiffusionT2Model(0.2, 2.0, nD, 20.0, 150.0, nT2)
+    D_grid, T2_grid = model.D, model.T2
     D_vals, T2_vals = np.linspace(0.2, 2.0, nD), np.linspace(20.0, 150.0, nT2)
-    A = create_A_matrix(D_grid, T2_grid, 0.0, 4.0, nB, 20.0, 180.0, nTE)
+    A = model.A(acquisition(0.0, 4.0, nB, 20.0, 180.0, nTE))
     U, s, V_mat = apply_SVD_to_A(A, R=10)
-    C_true = create_gaussian_compartments(
-        D_grid, T2_grid, [0.4, 0.9, 1.6], [0.1] * K, [90.0, 55.0, 120.0], [10.0] * K
+    C_true = dt2_compartments(model, [0.4, 0.9, 1.6], [0.1] * K, [90.0, 55.0, 120.0], [10.0] * K
     )
     W_true = np.random.default_rng(1).dirichlet(2.0 * np.ones(K), size=n_voxels).T
     M0_true = np.random.default_rng(2).uniform(0.8, 1.2, n_voxels)

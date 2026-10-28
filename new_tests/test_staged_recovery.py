@@ -7,15 +7,9 @@ parameterization and alternating updates are being debugged.
 import numpy as np
 import pytest
 
-from src.create_grid import (
-    apply_SVD_to_A,
-    create_A_matrix,
-    create_DT2_grid,
-    create_M0_true,
-    create_W_true,
-    create_gaussian_compartments,
-    create_signal,
-)
+from src.optimiser_alpha_gamma import apply_SVD_to_A
+from src.signal_models import DiffusionT2Model
+from src.simulation import create_M0_true, create_W_true, create_signal, gaussian_compartments
 from src.optimiser_alpha_gamma import (
     _lowest_b_data,
     define_initial_C_small,
@@ -29,14 +23,27 @@ from src.optimiser_alpha_gamma import (
 )
 
 
+def acquisition(minB, maxB, nB, minTE, maxTE, nTE):
+    """Every combination of nB b-values and nTE echo times, b-major (as the old create_A_matrix)."""
+    b = np.linspace(minB, maxB, nB)
+    TE = np.linspace(minTE, maxTE, nTE)
+    return {"b": np.repeat(b, nTE), "TE": np.tile(TE, nB)}
+
+
+def dt2_compartments(model, D_means, D_stds, T2_means, T2_stds):
+    """Gaussian compartments on the D-T2 grid (as the old create_gaussian_compartments)."""
+    centres = [{"D": d, "T2": t} for d, t in zip(D_means, T2_means)]
+    widths = [{"D": d, "T2": t} for d, t in zip(D_stds, T2_stds)]
+    return gaussian_compartments(model, centres, widths)
+
+
 def _fixture(n_voxels=20):
-    D_grid, T2_grid = create_DT2_grid(0.2, 2.0, 10, 20.0, 150.0, 10)
-    A = create_A_matrix(D_grid, T2_grid, 0.0, 4.0, 6, 20.0, 180.0, 6)
+    model = DiffusionT2Model(0.2, 2.0, 10, 20.0, 150.0, 10)
+    D_grid, T2_grid = model.D, model.T2
+    A = model.A(acquisition(0.0, 4.0, 6, 20.0, 180.0, 6))
     U, s, V_mat = apply_SVD_to_A(A, R=5)
 
-    C_true = create_gaussian_compartments(
-        D_grid,
-        T2_grid,
+    C_true = dt2_compartments(model,
         D_means=[0.4, 0.9, 1.6],
         D_stds=[0.08, 0.08, 0.08],
         T2_means=[90.0, 55.0, 120.0],

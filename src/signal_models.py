@@ -46,7 +46,11 @@ class DiffusionT2Model(SignalModel):
 
 
     def A(self, acq):
-        return np.exp(-np.outer(acq["b"], self.D)) * np.exp(-np.outer(acq["TE"], 1.0 / self.T2))
+        b = np.asarray(acq["b"], dtype=float).ravel()
+        TE = np.asarray(acq["TE"], dtype=float).ravel()
+        if b.shape != TE.shape:
+            raise ValueError("acq['b'] and acq['TE'] must have the same length")
+        return np.exp(-np.outer(b, self.D)) * np.exp(-np.outer(TE, 1.0 / self.T2))
 
     def initial_C(self, Y, A, K, **kwargs):
         return define_initial_C_NNLS(Y, A, range(Y.shape[1]), K, self.D_vals, self.T2_vals,

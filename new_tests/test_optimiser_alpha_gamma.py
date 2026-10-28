@@ -2,20 +2,34 @@ import numpy as np
 import pytest
 from src.optimiser_alpha_gamma import *
 from src.optimiser_alpha_gamma import _c_grid_regularization
-from src.create_grid import (
-    create_DT2_grid, create_A_matrix, apply_SVD_to_A,
-    create_gaussian_compartments, create_W_true, create_M0_true, create_signal,
-)
+from src.optimiser_alpha_gamma import apply_SVD_to_A
+from src.signal_models import DiffusionT2Model
+from src.simulation import create_W_true, create_M0_true, create_signal, gaussian_compartments
 from src.metrics import matched_errors
+
+def acquisition(minB, maxB, nB, minTE, maxTE, nTE):
+    """Every combination of nB b-values and nTE echo times, b-major (as the old create_A_matrix)."""
+    b = np.linspace(minB, maxB, nB)
+    TE = np.linspace(minTE, maxTE, nTE)
+    return {"b": np.repeat(b, nTE), "TE": np.tile(TE, nB)}
+
+
+def dt2_compartments(model, D_means, D_stds, T2_means, T2_stds):
+    """Gaussian compartments on the D-T2 grid (as the old create_gaussian_compartments)."""
+    centres = [{"D": d, "T2": t} for d, t in zip(D_means, T2_means)]
+    widths = [{"D": d, "T2": t} for d, t in zip(D_stds, T2_stds)]
+    return gaussian_compartments(model, centres, widths)
+
 
 TRUE_D_MEANS = [0.4, 0.9, 1.6]
 
 
 def _spectrum_setup():
-    D_grid, T2_grid = create_DT2_grid(0.2, 2.0, 16, 20.0, 150.0, 16)
-    A = create_A_matrix(D_grid, T2_grid, 0.0, 4.0, 8, 20.0, 180.0, 8)
+    model = DiffusionT2Model(0.2, 2.0, 16, 20.0, 150.0, 16)
+    D_grid, T2_grid = model.D, model.T2
+    A = model.A(acquisition(0.0, 4.0, 8, 20.0, 180.0, 8))
     U, s, V_mat = apply_SVD_to_A(A, R=6)
-    C_true = create_gaussian_compartments(D_grid, T2_grid, TRUE_D_MEANS, [0.08] * 3, [90, 55, 120], [10] * 3)
+    C_true = dt2_compartments(model, TRUE_D_MEANS, [0.08] * 3, [90, 55, 120], [10] * 3)
 
     rng = np.random.default_rng(0)
     W_true = create_W_true(3, 20, 3.0, rng)
@@ -330,10 +344,11 @@ def test_sigma2_collapses_to_floor_at_zero_noise():
 # NNLS/MADCO init: does optimisation reach the truth at zero noise? 
 
 def test_nnls_init_converges_close_to_truth_at_zero_noise():
-    D_grid, T2_grid = create_DT2_grid(0.2, 2.0, 12, 20.0, 150.0, 12)
-    A = create_A_matrix(D_grid, T2_grid, 0.0, 4.0, 8, 20.0, 180.0, 8)
+    model = DiffusionT2Model(0.2, 2.0, 12, 20.0, 150.0, 12)
+    D_grid, T2_grid = model.D, model.T2
+    A = model.A(acquisition(0.0, 4.0, 8, 20.0, 180.0, 8))
     U, s, V_mat = apply_SVD_to_A(A, R=5)
-    C_true = create_gaussian_compartments(D_grid, T2_grid, TRUE_D_MEANS, [0.08] * 3, [90, 55, 120], [10] * 3)
+    C_true = dt2_compartments(model, TRUE_D_MEANS, [0.08] * 3, [90, 55, 120], [10] * 3)
     D_vals, T2_vals = np.linspace(0.2, 2.0, 12), np.linspace(20.0, 150.0, 12)
 
     rng = np.random.default_rng(0)
@@ -361,10 +376,11 @@ def test_nnls_init_converges_close_to_truth_at_zero_noise():
 
 
 def test_madco_init_stays_bounded_at_zero_noise():
-    D_grid, T2_grid = create_DT2_grid(0.2, 2.0, 12, 20.0, 150.0, 12)
-    A = create_A_matrix(D_grid, T2_grid, 0.0, 4.0, 8, 20.0, 180.0, 8)
+    model = DiffusionT2Model(0.2, 2.0, 12, 20.0, 150.0, 12)
+    D_grid, T2_grid = model.D, model.T2
+    A = model.A(acquisition(0.0, 4.0, 8, 20.0, 180.0, 8))
     U, s, V_mat = apply_SVD_to_A(A, R=5)
-    C_true = create_gaussian_compartments(D_grid, T2_grid, TRUE_D_MEANS, [0.08] * 3, [90, 55, 120], [10] * 3)
+    C_true = dt2_compartments(model, TRUE_D_MEANS, [0.08] * 3, [90, 55, 120], [10] * 3)
     D_vals, T2_vals = np.linspace(0.2, 2.0, 12), np.linspace(20.0, 150.0, 12)
     b_vals, TE_vals = np.linspace(0.0, 4.0, 8), np.linspace(20.0, 180.0, 8)
 
