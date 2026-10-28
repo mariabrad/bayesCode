@@ -1,4 +1,5 @@
 import numpy as np
+from signal_models import *
 
 
 def create_DT2_grid(minD, maxD, nD, minT2, maxT2, nT2):

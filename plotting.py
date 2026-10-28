@@ -204,3 +204,110 @@ def plot_init_diagnostics(
             ax.set_title(f"Compartment {i+1}: sD={sD_i:.3f}, sT2={sT2_i:.1f}")
         plt.tight_layout()
         plt.show()
+
+
+def show_canonical_spectra(items, model):
+    K = items[0][1].shape[1]
+    xlabel, ylabel = model.labels
+    fig, axes = plt.subplots(len(items), K, figsize=(3*K, 3*len(items)), squeeze=False)
+    for row, (title, C) in enumerate(items):
+        for k in range(K):
+            axes[row, k].imshow(C[:, k].reshape(model.shape), origin='lower', aspect='auto',
+                                extent=model.extent)
+            axes[row, k].set_title(f'{title}, component {k+1}')
+            axes[row, k].set_xlabel(xlabel); axes[row, k].set_ylabel(ylabel)
+    plt.tight_layout()
+    plt.show()
+
+
+
+def order_components(C_true, C_est, W_est, K):
+    # Cost[i, j] = dissimilarity between true component i and estimated component j.
+    cost = np.array([
+    [np.mean((C_true[:, i] - C_est[:, j]) ** 2) for j in range(K)]
+    for i in range(K)
+    ])
+
+    true_indices, estimated_indices = linear_sum_assignment(cost)
+
+    # Put estimated components into the ground-truth component order.
+    order = estimated_indices[np.argsort(true_indices)]
+
+    C_est = C_est[:, order]
+    W_est = W_est[order, :]
+    return C_est, W_est
+
+def plot_voxel_spectra_and_weights(model, F_est, W_est, voxels,
+                                   F_true=None, W_true=None, fs=28, save_path=None):
+    """Voxel spectra and weights for a few voxels; ground truth is shown only if given."""
+    K = W_est.shape[0]
+    xlabel, ylabel = model.labels
+    spectra = ([("True\nspectrum", F_true)] if F_true is not None else []) + [("Estimated\nspectrum", F_est)]
+    row_names = [name for name, _ in spectra] + ["Weights"]
+    n_rows = len(row_names)
+
+    with plt.rc_context({"font.size": fs, "axes.labelsize": fs, "xtick.labelsize": fs - 4,
+                         "ytick.labelsize": fs - 4, "legend.fontsize": fs - 2}):
+        fig, axes = plt.subplots(n_rows, len(voxels), figsize=(8 * len(voxels), 20 * n_rows / 3),
+                                 constrained_layout=True)
+
+        components = np.arange(K)
+        for col, voxel in enumerate(voxels):
+            # Column header
+            axes[0, col].set_title(f"Voxel {voxel}", fontsize=fs + 8, fontweight="bold", pad=25)
+
+            for row, (_, F) in enumerate(spectra):
+                image = axes[row, col].imshow(F[:, voxel].reshape(model.shape), origin="lower",
+                                              aspect="auto", extent=model.extent)
+                fig.colorbar(image, ax=axes[row, col])
+                if col == 0:
+                    axes[row, col].set_ylabel(ylabel)
+            axes[n_rows - 2, col].set_xlabel(xlabel)
+
+            w = axes[n_rows - 1, col]
+            if W_true is not None:
+                w.bar(components - 0.19, W_true[:, voxel], 0.36, color="#2a78d6", label="True")
+                w.bar(components + 0.19, W_est[:, voxel], 0.36, color="#eb6834", label="Estimated")
+            else:
+                w.bar(components, W_est[:, voxel], 0.6, color="#eb6834", label="Estimated")
+            w.set(xticks=components, xticklabels=[f"W{k + 1}" for k in components], ylim=(0, 1))
+            w.spines[["top", "right"]].set_visible(False)
+        axes[n_rows - 1, 0].legend(frameon=False)
+
+        # Row headers
+        for row, name in enumerate(row_names):
+            axes[row, 0].annotate(name, xy=(0, 0.5), xycoords="axes fraction", xytext=(-150, 0),
+                                  textcoords="offset points", ha="center", va="center", rotation=90,
+                                  fontsize=fs + 8, fontweight="bold")
+
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.show()
+
+def show_voxelwise_spectra_est(model, F_est, W_est, voxels_to_show=[0, 5, 12, 17]):
+    xlabel, ylabel = model.labels
+    fig, axes = plt.subplots(
+        2, len(voxels_to_show),
+        figsize=(3.2 * len(voxels_to_show), 5.8),
+        constrained_layout=True,
+    )
+
+    for col, voxel in enumerate(voxels_to_show):
+        image = axes[0, col].imshow(
+            F_est[:, voxel].reshape(model.shape),
+            origin="lower",
+            aspect="auto",
+            extent=model.extent,
+        )
+        axes[0, col].set_title(f"Estimated: voxel {voxel}")
+        axes[0, col].set_xlabel(xlabel)
+        axes[0, col].set_ylabel(ylabel)
+        fig.colorbar(image, ax=axes[0, col], shrink=0.75)
+
+        # The second row reports the component weights that form this spectrum.
+        components = np.arange(W_est.shape[0])
+        axes[1, col].bar(components, W_est[:, voxel], 0.5, color="tab:orange")
+        axes[1, col].set(xticks=components, xticklabels=[f"W{k + 1}" for k in components],
+                         ylim=(0, 1), title=f"Weights: voxel {voxel}", ylabel="weight")
+
+    plt.show()
