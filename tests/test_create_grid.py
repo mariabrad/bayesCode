@@ -4,6 +4,7 @@ import pytest
 from create_grid import (
     create_DT2_grid,
     create_A_matrix,
+    create_A_matrix_from_acquisition,
     apply_SVD_to_A,
     create_gaussian_compartments,
     create_W_true,
@@ -30,6 +31,21 @@ def test_create_A_matrix_values_are_bounded_signal_decay():
     A = create_A_matrix(D_grid, T2_grid, 0.0, 4.0, 3, 20.0, 180.0, 4)
     assert (A > 0).all()
     assert (A <= 1.0 + 1e-12).all()
+
+
+def test_create_A_matrix_from_acquisition_respects_arbitrary_measurement_order():
+    D_grid, T2_grid = create_DT2_grid(0.2, 2.0, 5, 20.0, 150.0, 6)
+    b = np.array([2.0, 0.0, 4.0, 0.0])
+    te = np.array([80.0, 180.0, 20.0, 20.0])
+    A = create_A_matrix_from_acquisition(D_grid, T2_grid, b, te)
+    expected = np.exp(-np.outer(b, D_grid)) * np.exp(-np.outer(te, 1 / T2_grid))
+    np.testing.assert_allclose(A, expected)
+
+
+def test_create_A_matrix_from_acquisition_rejects_unpaired_coordinates():
+    D_grid, T2_grid = create_DT2_grid(0.2, 2.0, 5, 20.0, 150.0, 6)
+    with pytest.raises(ValueError):
+        create_A_matrix_from_acquisition(D_grid, T2_grid, [0.0, 1.0], [20.0])
 
 
 def test_apply_SVD_to_A_shapes():

@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from optimiser_alpha_gamma import *
+from optimiser_alpha_gamma import _c_grid_regularization
 from create_grid import (
     create_DT2_grid, create_A_matrix, apply_SVD_to_A,
     create_gaussian_compartments, create_W_true, create_M0_true, create_signal,
@@ -35,6 +36,21 @@ def test_define_csmall_nnls_picks_compartments_close_to_true_D():
     for D_c, _ in centers:
         closest_diff = min(abs(D_c - d) for d in TRUE_D_MEANS)
         assert closest_diff < 0.4
+
+
+def test_initial_c_nnls_and_svd_projection_are_separate_consistent_steps():
+    Y, A, s, V_mat = _spectrum_setup()
+    D_vals, T2_vals = np.linspace(0.2, 2.0, 16), np.linspace(20.0, 150.0, 16)
+    C_init = define_initial_C_NNLS(
+        Y, A, voxel_idx=range(20), K=3, D_vals=D_vals, T2_vals=T2_vals,
+        Dmin=0.2, Dmax=2.0, T2min=20.0, T2max=150.0, nD=16, nT2=16,
+    )
+    C_small = project_C_to_C_small(C_init, s, V_mat)
+    assert C_init.shape == (16 * 16, 3)
+    assert C_small.shape == (s.size, 3)
+    assert (C_init >= 0).all()
+    np.testing.assert_allclose(C_init.sum(axis=0), 1.0)
+    np.testing.assert_allclose(C_small, np.diag(s) @ V_mat.T @ C_init)
 
 
 def test_define_initial_C_small_MADCO_picks_compartments_close_to_true_D():
@@ -137,6 +153,61 @@ def test_update_W_recovers_true_value():
     W_est = update_W(Y, UC, sigma2=1.0, alpha=1.0, W=W_true.copy(), m=M0, bound_eps=1e-3)
     assert np.allclose(W_est, W_true, atol=1e-2)
     print("update_W OK, max err:", np.max(np.abs(W_est - W_true)))
+
+
+def test_initialize_w_from_fixed_c_recovers_noiseless_simplex_weights():
+    rng = np.random.default_rng(12)
+    n_meas, R, K, n_voxels = 7, 4, 3, 9
+    U, _ = np.linalg.qr(rng.normal(size=(n_meas, R)))
+    C_small = rng.normal(size=(R, K))
+    W_true = rng.dirichlet(np.ones(K), size=n_voxels).T
+    M0 = rng.uniform(0.8, 1.2, n_voxels)
+    Y = (U @ C_small @ W_true) * M0
+    W_init = initialize_W_from_C(Y, U, C_small, M0, bound_eps=1e-6)
+    np.testing.assert_allclose(W_init, W_true, atol=2e-5)
+
+
+def test_m0_prior_update_matches_sigma_scaled_map_solution():
+    Y = np.array([[2.0]])
+    UC = np.array([[1.0]])
+    W = np.array([[1.0]])
+    sigma2, prior_mean, prior_sigma = 0.1, np.array([1.0]), 0.5
+    estimate = update_M0(
+        Y, UC, W, prior_mean=prior_mean, prior_sigma=prior_sigma,
+        sigma2=sigma2,
+    )
+    expected = (2.0 + sigma2 * prior_mean[0] / prior_sigma**2) / (
+        1.0 + sigma2 / prior_sigma**2
+    )
+    np.testing.assert_allclose(estimate, [expected])
+
+
+def test_compute_loss_includes_active_full_c_priors():
+    Y = np.zeros((2, 1))
+    UC = np.zeros((2, 2))
+    W = np.array([[0.5], [0.5]])
+    M0 = np.ones(1)
+    C_small = np.zeros((1, 2))
+    C = np.array([[0.7, 0.1], [0.2, 0.2], [0.1, 0.7], [0.0, 0.0]])
+    base, _ = compute_loss(Y, UC, W, M0, 1.0, 0.0, C_small, 1.0)
+    total, _ = compute_loss(
+        Y, UC, W, M0, 1.0, 0.0, C_small, 1.0, C=C,
+        c_smoothness=2.0, c_sparsity=0.3, c_diversity=0.4, nD=2, nT2=2,
+    )
+    expected_prior, _ = _c_grid_regularization(C, 2.0, 0.3, 0.4, 2, 2)
+    np.testing.assert_allclose(total - base, expected_prior)
+
+
+def test_reduced_csmall_runner_supports_weight_entropy():
+    W0 = np.array([[0.60, 0.55], [0.40, 0.45]])
+    W_est, *_ = run_optimisation(
+        Y=np.zeros((2, 2)), U=np.zeros((2, 1)), C_small=np.zeros((1, 2)),
+        M0=np.ones(2), K=2, R=1, eps=1e-10, n_iter=1, sigma2=1.0,
+        alpha=1.0, lam=0.0, W=W0, bound_eps=1e-3,
+        update_alpha_flag=False, update_M0_flag=False, update_C_flag=False,
+        weight_entropy=5.0, verbose_every=1000,
+    )
+    assert np.all(W_est.max(axis=0) > W0.max(axis=0))
 
 
 def test_update_alpha_recovers_true_value():

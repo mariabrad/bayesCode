@@ -4,6 +4,15 @@ This project estimates per-voxel tissue mixture weights (`W`) and shared tissue-
 
 The signal model uses diffusion coefficients (`D`), T2 relaxation times, a Dirichlet prior on voxel mixture weights and SVD compression of the forward model before optimisation.
 
+## Optimisation modes
+
+Two optimisation paths are available.
+
+- `run_optimisation` optimises the reduced coefficients `C_small` directly. It has only `R × K` spectral parameters and is therefore faster, but the inferred full-grid spectra require inverse-SVD mapping and post-processing to enforce nonnegativity and normalization.
+- `run_constrained_optimisation` optimises full-grid canonical spectra `C` through softmax logits. Every component remains nonnegative and sums to one throughout optimization. It still evaluates the SVD-reduced forward model `U @ (S @ V.T @ C) @ W`, but has more free spectral parameters and benefits from a meaningful prior or regularizer on `C`.
+
+Use the constrained mode when physically valid canonical spectra are the priority. Use the reduced mode for rapid experiments or as a comparison baseline.
+
 ## Getting started
 
 Install the Python dependencies:

@@ -4,8 +4,10 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 .venv/
+.conda/
 venv/
 env/
 *.egg-info/
 dist/
 build/
+.claude/
