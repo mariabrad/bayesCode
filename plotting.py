@@ -311,3 +311,26 @@ def show_voxelwise_spectra_est(model, F_est, W_est, voxels_to_show=[0, 5, 12, 17
                          ylim=(0, 1), title=f"Weights: voxel {voxel}", ylabel="weight")
 
     plt.show()
+
+def plot_voxel_fit(Y, Y_pred, voxel, b, TE, title, ax=None):
+    """Measured (dots) vs predicted (lines) signal for one voxel, one colour per TE.
+    Returns the relative fitting error."""
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6.5, 5))
+
+    measured = Y[:, voxel]
+    predicted = Y_pred[:, voxel]
+
+    for te in np.unique(TE):
+        m = TE == te
+        line, = ax.plot(b[m], measured[m], "o")
+        ax.plot(b[m], predicted[m], "-", color=line.get_color(), label=f"TE {te:g} ms")
+
+    rel_error = np.linalg.norm(measured - predicted) / np.linalg.norm(measured)
+
+    ax.set_yscale("log")
+    ax.set_title(f"{title}\nvoxel {voxel} - relative error = {rel_error:.3f}")
+    ax.set_xlabel("b (ms/µm²)")
+    ax.set_ylabel("signal")
+    ax.legend(fontsize=8)
+    return rel_error
