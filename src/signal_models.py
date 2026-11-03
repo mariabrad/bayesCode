@@ -3,13 +3,13 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 from .optimiser_alpha_gamma import define_initial_C_NNLS, initialize_M0_monoexponential
-
+from scipy.special import erf
 
 class SignalModel(ABC):
-    """Every signal model needs a grid (params, shape) and these three methods."""
+    "Every signal model needs a grid (params, shape) and these three methods"
 
     def make_grid(self, **axes):
-        """Build the grid from named axes, e.g. make_grid(D=D_vals, T2=T2_vals)."""
+       
         names = list(axes.keys())
         values = list(axes.values())
 
@@ -60,3 +60,38 @@ class DiffusionT2Model(SignalModel):
 
     def initial_M0(self, Y, acq):
         return initialize_M0_monoexponential(Y, np.unique(acq["b"]), np.unique(acq["TE"]))
+
+
+
+class DTDModel(SignalModel):
+ 
+    def __init__(self, Disomin, Disomax, nDiso, Ddelmin, Ddelmax, nDdel):
+        self.nDiso, self.nDdel = nDiso, nDdel
+        self.Diso_vals = np.linspace(Disomin, Disomax, nDiso)
+        self.Ddel_vals = np.linspace(Ddelmin, Ddelmax, nDdel)
+        self.make_grid(Diso=self.Diso_vals, Ddel=self.Ddel_vals)
+        self.Diso, self.Ddel = self.params["Diso"], self.params["Ddel"]
+ 
+        self.extent = [Ddelmin, Ddelmax, Disomin, Disomax]    # for imshow: x = Ddel, y = Diso
+        self.labels = ("Ddel", "Diso (µm²/ms)")
+ 
+    def A(self, acq):
+        b = np.asarray(acq["b"], dtype=float)[:, None]
+        beta = np.asarray(acq["beta"], dtype=float)[:, None]
+        eps = 1e-7  
+        
+        alpha = 3 * b * self.Diso * beta * self.Ddel + eps  
+        sqrt_alpha = np.emath.sqrt(alpha)
+        return np.exp(-b * self.Diso) * np.exp(alpha / 3) * np.sqrt(np.pi) / 2 * np.real(erf(sqrt_alpha) / sqrt_alpha)
+ 
+    def initial_C(self, Y, A, K, **kwargs):
+        return define_initial_C_NNLS(Y, A, range(Y.shape[1]), K, self.Diso_vals, self.Ddel_vals,
+                                     self.Diso_vals.min(), self.Diso_vals.max(),
+                                     self.Ddel_vals.min(), self.Ddel_vals.max(),
+                                     self.nDiso, self.nDdel, **kwargs)
+ 
+    def initial_M0(self, Y, acq):
+        b0 = np.asarray(acq["b"]) < 0.05                       #M0 - mean of Y over the b = 0 measurements
+
+        return Y[b0].mean(axis=0)
+ 
