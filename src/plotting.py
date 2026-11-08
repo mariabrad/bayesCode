@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from itertools import combinations
 
 
 def plot_compartment_comparison_nomatch(C_true, C_est, model):
@@ -15,11 +16,11 @@ def plot_compartment_comparison(C_true, C_est, model):
 
 
 def plot_voxel_grid_comparison(
-    C_a, W_a, C_b, W_b, K, n_voxels, nD, nT2,
+    C_a, W_a, C_b, W_b, K, n_voxels, model,
     n_show_per_block=20, label_a="True", label_b="Est",
 ):
-    assert C_a.shape == C_b.shape == (nD * nT2, K), \
-        f"C_a and C_b must be full-grid ({nD * nT2}, {K}), got {C_a.shape} and {C_b.shape}"
+    assert C_a.shape == C_b.shape == (np.prod(model.shape), K), \
+        f"C_a and C_b must be full-grid ({np.prod(model.shape)}, {K}), got {C_a.shape} and {C_b.shape}"
     assert W_a.shape == W_b.shape and W_a.shape[0] == K, \
         f"W_a and W_b must both be ({K}, n_voxels), got {W_a.shape} and {W_b.shape}"
 
@@ -52,8 +53,8 @@ def plot_voxel_grid_comparison(
         r = i // ncols
         c = i % ncols
 
-        a_map = F_a_plot[:, v].reshape(nD, nT2)
-        b_map = F_b_plot[:, v].reshape(nD, nT2)
+        a_map = F_a_plot[:, v].reshape(model.shape)
+        b_map = F_b_plot[:, v].reshape(model.shape)
 
         a_map = a_map / (a_map.max() + 1e-12)
         b_map = b_map / (b_map.max() + 1e-12)
@@ -70,8 +71,8 @@ def plot_voxel_grid_comparison(
         ax_b.set_title(f"Voxel {v} - {label_b}", fontsize=7, pad=2)
         ax_b.axis("off")
 
-    fig.text(0.5, 0.01, "T2", ha="center", va="bottom", fontsize=12)
-    fig.text(0.01, 0.5, "D", ha="left", va="center", rotation="vertical", fontsize=12)
+    fig.text(0.5, 0.01, model.labels[0], ha="center", va="bottom", fontsize=12)
+    fig.text(0.01, 0.5, model.labels[1], ha="left", va="center", rotation="vertical", fontsize=12)
 
     plt.tight_layout(rect=[0.03, 0.03, 1, 0.96])
     fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.6)
@@ -271,3 +272,73 @@ def plot_voxel_fit(Y, Y_pred, voxel, b, TE, title, ax=None):
     ax.set_ylabel("signal")
     ax.legend(fontsize=8)
     return rel_error
+
+
+def show_projections(C, model, title="", save_path=None):
+    """Spectra on a grid with any number of axes (e.g. 3D): for each column of C, sum the grid
+    onto every pair of axes. One row per column of C, one panel per axis pair."""
+    names = list(model.params)                                   # axis names, in grid order
+    pairs = list(combinations(range(len(model.shape)), 2))
+    fig, axes = plt.subplots(C.shape[1], len(pairs), figsize=(4 * len(pairs), 3.5 * C.shape[1]),
+                             squeeze=False, constrained_layout=True)
+    for k in range(C.shape[1]):
+        grid = C[:, k].reshape(model.shape)
+        for col, (i, j) in enumerate(pairs):
+            hidden = tuple(a for a in range(grid.ndim) if a not in (i, j))
+            extent = [model.axes[j][0], model.axes[j][-1], model.axes[i][0], model.axes[i][-1]]
+            image = axes[k, col].imshow(grid.sum(axis=hidden), origin="lower", aspect="auto", extent=extent)
+            axes[k, col].set(xlabel=names[j], ylabel=names[i], title=f"{title} {k + 1}")
+            fig.colorbar(image, ax=axes[k, col])
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.show()
+
+
+def show_cluster_projections(tissue_spectrum, labels, model, save_path=None):
+    """k-means clusters from initial_C(..., return_diagnostics=True): each cluster's part
+    of the averaged tissue spectrum, shown as projections."""
+    K = labels.max() + 1
+    parts = np.stack([tissue_spectrum * (labels.ravel() == k) for k in range(K)], axis=1)
+    show_projections(parts, model, title="Cluster", save_path=save_path)
+
+
+def show_clusters_3d(tissue_spectrum, labels, model, threshold=0.01, save_path=None):
+    """3D grid points that hold spectrum mass, coloured by k-means cluster, sized by mass."""
+    names = list(model.params)
+    keep = tissue_spectrum > threshold * tissue_spectrum.max()      # hide empty grid points
+    x, y, z = (model.params[n][keep] for n in names)
+    fig = plt.figure(figsize=(8, 6))
+    ax = fig.add_subplot(projection="3d")
+    points = ax.scatter(x, y, z, c=labels.ravel()[keep], cmap="tab10", vmin=0, vmax=9,
+                        s=300 * tissue_spectrum[keep] / tissue_spectrum.max(), alpha=0.7)
+    ax.set(xlabel=names[0], ylabel=names[1], zlabel=names[2], title="k-means clusters")
+    handles, _ = points.legend_elements()
+    ax.legend(handles, [f"Cluster {k + 1}" for k in range(len(handles))])
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.show()
+
+
+def show_compartments_3d(items, model, name="Compartment", threshold=0.01, save_path=None):
+    """Side-by-side 3D scatters, one per (title, C) in items, e.g. [("True", C_true), ("Recovered", C_est)].
+    Each grid point is coloured by the compartment that is largest there and sized by the
+    total of all compartments; near-empty points are hidden."""
+    names = list(model.params)
+    fig = plt.figure(figsize=(7 * len(items), 6))
+    for n, (title, C) in enumerate(items):
+        total = C.sum(axis=1)
+        keep = total > threshold * total.max()                       # hide empty grid points
+        x, y, z = (model.params[p][keep] for p in names)
+        largest = C.argmax(axis=1)[keep]
+        ax = fig.add_subplot(1, len(items), n + 1, projection="3d")
+        points = ax.scatter(x, y, z, c=largest, cmap="tab10", vmin=0, vmax=9,
+                            s=300 * total[keep] / total.max(), alpha=0.7)
+        ax.set(xlabel=names[0], ylabel=names[1], zlabel=names[2], title=title)
+        ax.set(xlim=(model.axes[0][0], model.axes[0][-1]), ylim=(model.axes[1][0], model.axes[1][-1]),
+               zlim=(model.axes[2][0], model.axes[2][-1]))              # same box in every panel
+        if C.shape[1] > 1:
+            handles, _ = points.legend_elements()
+            ax.legend(handles, [f"{name} {k + 1}" for k in np.unique(largest)])
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.show()

@@ -13,22 +13,22 @@ def threshold_spectrum(f, relative_threshold=0.05):
     return f / f.sum()
 
 
-def find_spectral_peaks(f, nD, nT2, relative_threshold=0.1):
-    """Local maxima of a spectrum on the nD x nT2 grid, strongest first.
+def find_spectral_peaks(f, shape, relative_threshold=0.1):
+    """Local maxima of a spectrum on a grid of the given shape (e.g. model.shape), strongest first.
 
     Peaks weaker than relative_threshold * max are ignored. Each peak is a dict
-    with its grid position (D_index, T2_index) and its value.
+    with its grid position ("index", one entry per axis) and its value.
     """
     f = np.asarray(f, dtype=float)
-    if f.size != nD * nT2:
-        raise ValueError(f"spectrum has {f.size} values, expected nD * nT2 = {nD * nT2}")
-    image = f.reshape(nD, nT2)
+    if f.size != np.prod(shape):
+        raise ValueError(f"spectrum has {f.size} values, expected {np.prod(shape)}")
+    image = f.reshape(shape)
 
     # a peak is at least as large as its 8 neighbours (outside the grid counts as -inf)
     is_peak = image == maximum_filter(image, size=3, mode="constant", cval=-np.inf)
     is_peak &= image > 0
     is_peak &= image >= relative_threshold * image.max()
 
-    peaks = [{"D_index": int(i), "T2_index": int(j), "value": float(image[i, j])}
-             for i, j in zip(*np.nonzero(is_peak))]
+    peaks = [{"index": tuple(int(i) for i in ij), "value": float(image[ij])}
+             for ij in zip(*np.nonzero(is_peak))]
     return sorted(peaks, key=lambda p: p["value"], reverse=True)

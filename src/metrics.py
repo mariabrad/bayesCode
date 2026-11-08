@@ -22,16 +22,16 @@ def m0_mae(M0_true, M0_est):
     return float(np.mean(np.abs(M0_true - M0_est)))
 
 
-def dominant_peak_grid_error(F_true, F_est, nD, nT2):
-    """Mean dominant-peak displacement, measured in spectral-grid cells."""
+def dominant_peak_grid_error(F_true, F_est, shape):
+    """Mean dominant-peak displacement, measured in spectral-grid cells (shape e.g. model.shape)."""
     F_true = np.asarray(F_true, dtype=float)
     F_est = np.asarray(F_est, dtype=float)
-    if F_true.shape != F_est.shape or F_true.shape[0] != nD * nT2:
-        raise ValueError("spectra must match and have nD * nT2 rows")
+    if F_true.shape != F_est.shape or F_true.shape[0] != np.prod(shape):
+        raise ValueError("spectra must match and have one row per grid point")
     errors = []
     for voxel in range(F_true.shape[1]):
-        true_index = np.unravel_index(np.argmax(F_true[:, voxel]), (nD, nT2))
-        est_index = np.unravel_index(np.argmax(F_est[:, voxel]), (nD, nT2))
+        true_index = np.unravel_index(np.argmax(F_true[:, voxel]), shape)
+        est_index = np.unravel_index(np.argmax(F_est[:, voxel]), shape)
         errors.append(np.linalg.norm(np.subtract(true_index, est_index)))
     return float(np.mean(errors))
 

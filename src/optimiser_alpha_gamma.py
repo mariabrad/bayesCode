@@ -249,18 +249,35 @@ def update_M0(Y, UC, W, prior_mean=None, prior_sigma=None, sigma2=1.0):
     return M0_new                                                 
 
 
-def initialize_M0_from_b0_T2(Y, b_values, TE_values, T2_vals, b_tolerance=0.05):
-    """Estimate voxelwise M0 by NNLS fitting the b=0 multi-TE signal.
+def _lowest_b_rows(Y, A, b_values, b_tolerance=0.05):
+    """Return the rows of A and Y acquired at b=0, allowing a small b tolerance.
 
-    For normalized spectra, the sum of fitted nonnegative T2 amplitudes
-    estimates the voxel scale M0. Rows near b=0 are selected by their b
-    values, not row position.
+    If the model has no diffusion (b_values is None), every measurement is
+    diffusion-free, so all rows are returned.
     """
-    TE_b0, b0 = _lowest_b_data(Y, b_values, TE_values, b_tolerance)
-    A_T2 = np.exp(-np.outer(TE_b0, 1.0 / T2_vals))
+    if b_values is None:
+        return A, Y
+    b = np.asarray(b_values, dtype=float).ravel()
+    if b.size != Y.shape[0]:
+        raise ValueError(f"b_values has {b.size} entries but Y has {Y.shape[0]} measurements; "
+                         "pass one b per measurement (acq['b']), not np.unique(acq['b'])")
+    is_b0 = np.isclose(b, 0.0, atol=b_tolerance, rtol=0.0)     # True for b = 0 measurements
+    if not np.any(is_b0):
+        raise ValueError(f"no b=0 measurements found within tolerance {b_tolerance}")
+    return A[is_b0], Y[is_b0]
+
+
+def initialize_M0_from_b0(Y, A, b_values=None, b_tolerance=0.05):
+    """Estimate voxelwise M0 by NNLS fitting the b=0 signal, for any model.
+
+    For normalized spectra, the sum of fitted nonnegative amplitudes
+    estimates the voxel scale M0. Rows near b=0 are selected by their b
+    values, not row position. With no b values, all rows are used.
+    """
+    A_b0, b0 = _lowest_b_rows(Y, A, b_values, b_tolerance)
     M0 = np.empty(Y.shape[1])
     for voxel in range(Y.shape[1]):
-        amplitudes, _ = nnls(A_T2, b0[:, voxel])
+        amplitudes, _ = nnls(A_b0, b0[:, voxel])
         M0[voxel] = amplitudes.sum()
     return M0
 
@@ -310,18 +327,20 @@ def reduced_forward_matrix(U, s, V_mat):
     return (U * s[np.newaxis, :]) @ V_mat.T
 
 
-def _grid_smoothness(C, nD, nT2):
-    """Return first-difference grid penalty and its gradient for C."""
-    grid = C.reshape(nD, nT2, C.shape[1])
-    d_diff = grid[1:, :, :] - grid[:-1, :, :]
-    t2_diff = grid[:, 1:, :] - grid[:, :-1, :]
-    penalty = 0.5 * (np.sum(d_diff**2) + np.sum(t2_diff**2))
+def _grid_smoothness(C, shape):
+    """Return first-difference grid penalty and its gradient for C, on a grid of any shape."""
+    grid = C.reshape(*shape, C.shape[1])
+    penalty = 0.0
     gradient = np.zeros_like(grid)
-    gradient[:-1, :, :] -= d_diff
-    gradient[1:, :, :] += d_diff
-    gradient[:, :-1, :] -= t2_diff
-    gradient[:, 1:, :] += t2_diff
+    for axis in range(len(shape)):
+        diff = np.diff(grid, axis=axis)                          # neighbour differences along this axis
+        lower = [slice(None)] * grid.ndim; lower[axis] = slice(None, -1)
+        upper = [slice(None)] * grid.ndim; upper[axis] = slice(1, None)
+        penalty += 0.5 * np.sum(diff**2)
+        gradient[tuple(lower)] -= diff
+        gradient[tuple(upper)] += diff
     return penalty, gradient.reshape(C.shape)
+
 
 
 def _component_overlap(C):
@@ -336,12 +355,13 @@ def _component_overlap(C):
 def _c_grid_regularization(C, smoothness=0.0, sparsity=0.0, diversity=0.0,
                            nD=None, nT2=None):
     """Evaluate full-grid C priors and their gradient in one shared place."""
-    if smoothness and (nD is None or nT2 is None or nD * nT2 != C.shape[0]):
-        raise ValueError("smoothness requires nD and nT2 matching the spectral grid")
+    shape = nD if nT2 is None else (nD, nT2)       # nD can also be the full grid shape, e.g. model.shape
+    if smoothness and (shape is None or np.prod(shape) != C.shape[0]):
+        raise ValueError("smoothness requires a grid shape matching the spectral grid")
     value = 0.0
     gradient = np.zeros_like(C)
     if smoothness:
-        penalty, penalty_gradient = _grid_smoothness(C, nD, nT2)
+        penalty, penalty_gradient = _grid_smoothness(C, shape)
         value += smoothness * penalty
         gradient += smoothness * penalty_gradient
     if sparsity:
@@ -396,8 +416,9 @@ def update_C_constrained(Y, U, s, V_mat, W, M0, C, sigma2, lam=0.0,
     reduced forward model U @ diag(s) @ V.T @ C.
     """
     n_grid, K = C.shape
-    if smoothness and (nD is None or nT2 is None or nD * nT2 != n_grid):
-        raise ValueError("smoothness requires nD and nT2 matching the spectral grid")
+    shape = nD if nT2 is None else (nD, nT2)       # nD can also be the full grid shape, e.g. model.shape
+    if smoothness and (shape is None or np.prod(shape) != n_grid):
+        raise ValueError("smoothness requires a grid shape matching the spectral grid")
     C0 = np.clip(C, 1e-12, None)
     logits0 = np.log(C0).ravel()
     result = minimize(
@@ -496,19 +517,12 @@ def define_initial_C_small(Y, U, W, M0, K):
     return C_small_init.T                     # (R, K)
 
 
-def define_initial_C_NNLS(Y, A, voxel_idx, K, D_vals, T2_vals,
-                          Dmin, Dmax, T2min, T2max, nD, nT2, seed=0,
+def define_initial_C_grid(Y, A, voxel_idx, K, axes, seed=0,
                           return_diagnostics=False, min_fraction=0.0):
-    """Build full-grid, physical canonical-spectrum initial values from NNLS.
+    """Same as define_initial_C_NNLS, but for any grid. axes = list of 1D grid axes, e.g. [D_vals, T2_vals]."""
+    axes = [np.asarray(a, dtype=float) for a in axes]
+    shape = tuple(a.size for a in axes)
 
-    Voxelwise NNLS spectra are averaged, partitioned with weighted k-means,
-    and represented by one normalized Gaussian D--T2 hotspot per component.
-    This function intentionally has no SVD inputs: it returns ``C_init`` in
-    the physical spectral grid, with shape ``(nD * nT2, K)``.
-
-    Grid cells below ``min_fraction`` of the mean spectrum's maximum are set
-    to zero before clustering (0 keeps everything).
-    """
     spectra = []
     for v in voxel_idx:
         f, _ = _solve_nnls(A, Y[:, v])
@@ -518,47 +532,51 @@ def define_initial_C_NNLS(Y, A, voxel_idx, K, D_vals, T2_vals,
     if min_fraction > 0:
         tissue_spectrum[tissue_spectrum < min_fraction * tissue_spectrum.max()] = 0
         tissue_spectrum /= tissue_spectrum.sum()
-    F_tissue = tissue_spectrum.reshape(nD, nT2)
+    F_tissue = tissue_spectrum.reshape(shape)
 
-    D_mesh, T2_mesh = np.meshgrid(D_vals, T2_vals, indexing='ij')
-    grid_points = np.column_stack([
-        (D_mesh.ravel() - Dmin) / (Dmax - Dmin),
-        (T2_mesh.ravel() - T2min) / (T2max - T2min),
-    ])
+    meshes = np.meshgrid(*axes, indexing='ij')
+    lows = [a.min() for a in axes]
+    highs = [a.max() for a in axes]
+    grid_points = np.column_stack([(mesh.ravel() - lo) / (hi - lo)       # each axis scaled to [0, 1]
+                                   for mesh, lo, hi in zip(meshes, lows, highs)])
     kmeans = KMeans(n_clusters=K, n_init=10, random_state=seed)
     kmeans.fit(grid_points, sample_weight=tissue_spectrum)
-    labels = kmeans.labels_.reshape(nD, nT2)
+    labels = kmeans.labels_.reshape(shape)
 
-    D_step = D_vals[1] - D_vals[0]
-    T2_step = T2_vals[1] - T2_vals[0]
-    n_grid = nD * nT2
-    C_new_gauss = np.zeros((n_grid, K))
+    steps = [a[1] - a[0] for a in axes]
+    C_new_gauss = np.zeros((F_tissue.size, K))
     compartment_centers = []
     compartment_widths = []
-    GD, GT2 = np.meshgrid(D_vals, T2_vals, indexing='ij')
     for i in range(K):
-        idxD, idxT2 = np.nonzero(labels == i)
-        w = F_tissue[idxD, idxT2]
-        if w.sum() <= 0 or len(idxD) == 0:
+        idx = np.nonzero(labels == i)              # grid indices of this cluster, one array per axis
+        w = F_tissue[idx]
+        if w.sum() <= 0 or len(idx[0]) == 0:
             # fall back to a broad default (avoids divide-by-zero)
-            D_c, T2_c = Dmin + (Dmax - Dmin) / 2, T2min + (T2max - T2min) / 2
-            sD, sT2 = (Dmax - Dmin) / 4, (T2max - T2min) / 4
+            centre = [lo + (hi - lo) / 2 for lo, hi in zip(lows, highs)]
+            width = [(hi - lo) / 4 for lo, hi in zip(lows, highs)]
         else:
-            D_c = np.sum(D_vals[idxD] * w) / w.sum()
-            T2_c = np.sum(T2_vals[idxT2] * w) / w.sum()
-            sD = np.sqrt(np.sum(w * (D_vals[idxD] - D_c) ** 2) / w.sum())
-            sT2 = np.sqrt(np.sum(w * (T2_vals[idxT2] - T2_c) ** 2) / w.sum())
-            sD = max(sD, D_step)      # floor to at least one grid step
-            sT2 = max(sT2, T2_step)
-        compartment_centers.append((D_c, T2_c))
-        compartment_widths.append((sD, sT2))
+            centre = [np.sum(a[j] * w) / w.sum() for a, j in zip(axes, idx)]
+            width = [np.sqrt(np.sum(w * (a[j] - c) ** 2) / w.sum()) for a, j, c in zip(axes, idx, centre)]
+            width = [max(s, step) for s, step in zip(width, steps)]     # floor to at least one grid step
+        compartment_centers.append(tuple(centre))
+        compartment_widths.append(tuple(width))
 
-        blob = np.exp(-0.5 * ((GD - D_c) / sD) ** 2) * np.exp(-0.5 * ((GT2 - T2_c) / sT2) ** 2)
+        blob = np.ones(shape)
+        for mesh, c, s in zip(meshes, centre, width):
+            blob = blob * np.exp(-0.5 * ((mesh - c) / s) ** 2)
         C_new_gauss[:, i] = blob.ravel() / blob.sum()
 
     if return_diagnostics:
         return C_new_gauss, tissue_spectrum, labels, compartment_centers, compartment_widths
     return C_new_gauss
+
+
+def define_initial_C_NNLS(Y, A, voxel_idx, K, D_vals, T2_vals,
+                          Dmin, Dmax, T2min, T2max, nD, nT2, seed=0,
+                          return_diagnostics=False, min_fraction=0.0):
+    """D--T2 version of define_initial_C_grid, kept for older code."""
+    return define_initial_C_grid(Y, A, voxel_idx, K, [D_vals, T2_vals], seed=seed,
+                                 return_diagnostics=return_diagnostics, min_fraction=min_fraction)
 
 
 def define_initial_C_NNLS_mean(Y, A, voxel_idx, K, D_vals, T2_vals,
@@ -635,6 +653,59 @@ def project_C_to_C_small(C, s, V_mat):
     if V_mat.shape[1] != s.size:
         raise ValueError("s must have one value per retained V_mat column")
     return (s[:, np.newaxis] * V_mat.T) @ C
+
+def define_initial_C_grid(Y, A, voxel_idx, K, axes, seed=0,
+                          return_diagnostics=False, min_fraction=0.0):
+    """Same as define_initial_C_NNLS, but for any grid. axes = list of 1D grid axes, e.g. [D_vals, T2_vals]."""
+    axes = [np.asarray(a, dtype=float) for a in axes]
+    shape = tuple(a.size for a in axes)
+
+    spectra = []
+    for v in voxel_idx:
+        f, _ = _solve_nnls(A, Y[:, v])
+        spectra.append(f / f.sum() if f.sum() > 0 else f)
+    tissue_spectrum = np.mean(spectra, axis=0)
+    tissue_spectrum /= tissue_spectrum.sum()
+    if min_fraction > 0:
+        tissue_spectrum[tissue_spectrum < min_fraction * tissue_spectrum.max()] = 0
+        tissue_spectrum /= tissue_spectrum.sum()
+    F_tissue = tissue_spectrum.reshape(shape)
+
+    meshes = np.meshgrid(*axes, indexing='ij')
+    lows = [a.min() for a in axes]
+    highs = [a.max() for a in axes]
+    grid_points = np.column_stack([(mesh.ravel() - lo) / (hi - lo)       # each axis scaled to [0, 1]
+                                   for mesh, lo, hi in zip(meshes, lows, highs)])
+    kmeans = KMeans(n_clusters=K, n_init=10, random_state=seed)
+    kmeans.fit(grid_points, sample_weight=tissue_spectrum)
+    labels = kmeans.labels_.reshape(shape)
+
+    steps = [a[1] - a[0] for a in axes]
+    C_new_gauss = np.zeros((F_tissue.size, K))
+    compartment_centers = []
+    compartment_widths = []
+    for i in range(K):
+        idx = np.nonzero(labels == i)              # grid indices of this cluster, one array per axis
+        w = F_tissue[idx]
+        if w.sum() <= 0 or len(idx[0]) == 0:
+            # fall back to a broad default (avoids divide-by-zero)
+            centre = [lo + (hi - lo) / 2 for lo, hi in zip(lows, highs)]
+            width = [(hi - lo) / 4 for lo, hi in zip(lows, highs)]
+        else:
+            centre = [np.sum(a[j] * w) / w.sum() for a, j in zip(axes, idx)]
+            width = [np.sqrt(np.sum(w * (a[j] - c) ** 2) / w.sum()) for a, j, c in zip(axes, idx, centre)]
+            width = [max(s, step) for s, step in zip(width, steps)]     # floor to at least one grid step
+        compartment_centers.append(tuple(centre))
+        compartment_widths.append(tuple(width))
+
+        blob = np.ones(shape)
+        for mesh, c, s in zip(meshes, centre, width):
+            blob = blob * np.exp(-0.5 * ((mesh - c) / s) ** 2)
+        C_new_gauss[:, i] = blob.ravel() / blob.sum()
+
+    if return_diagnostics:
+        return C_new_gauss, tissue_spectrum, labels, compartment_centers, compartment_widths
+    return C_new_gauss
 
 
 def define_initial_C_small_NNLS(Y, A, s, V_mat, voxel_idx, K, D_vals, T2_vals,

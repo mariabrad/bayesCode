@@ -15,4 +15,4 @@ def test_dominant_peak_grid_error():
     F_true[0, 0] = F_est[0, 0] = 1.0
     F_true[8, 1] = 1.0
     F_est[5, 1] = 1.0  # (2, 2) versus (1, 2): one grid cell apart
-    assert dominant_peak_grid_error(F_true, F_est, 3, 3) == pytest.approx(0.5)
+    assert dominant_peak_grid_error(F_true, F_est, (3, 3)) == pytest.approx(0.5)
