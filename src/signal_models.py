@@ -24,9 +24,26 @@ class SignalModel(ABC):
             self.params[name] = mesh.ravel()
 
 
-    def initial_M0(self, Y, acq):
-        "Default M0: NNLS fit to the b=0 rows (or all rows if the model has no b)"
-        return initialize_M0_from_b0(Y, self.A(acq), acq.get("b"))
+    T2_default = 100.0   # ms and it is used by models without a T2 axis
+
+    def t2_factor(self, acq):
+        "exp(-TE/T2) for every measurement and grid point"
+        TE = np.asarray(acq["TE"], dtype=float).ravel()[:, None]
+
+        if "T2" in self.params:          # model has a T2 axis -> use its list
+            T2 = self.params["T2"]
+        else:                            # no T2 axis -> one default value for every grid point
+            T2 = self.T2_default
+
+        return np.exp(-TE / T2)
+
+
+    def initial_constant(self, Y, acq):
+        "Scale constant: M0 if there are several TEs, otherwise S0 (the b=0 signal at that one TE)"
+        TE = acq.get("TE")
+        if TE is not None and np.unique(TE).size > 1:
+            return initialize_M0_from_b0(Y, self.A(acq), acq.get("b"))   # several TEs -> M0
+        return initialize_S0_linear(Y, self, acq)                         # one TE -> S0
 
 
     @abstractmethod
@@ -57,14 +74,15 @@ class DiffusionT2Model(SignalModel):
         TE = np.asarray(acq["TE"], dtype=float).ravel()
         if b.shape != TE.shape:
             raise ValueError("acq['b'] and acq['TE'] must have the same length")
-        return np.exp(-np.outer(b, self.D)) * np.exp(-np.outer(TE, 1.0 / self.T2))
+        return np.exp(-np.outer(b, self.D)) * self.t2_factor(acq)
 
 
 
 
 class DTDModel(SignalModel):
  
-    def __init__(self, Disomin, Disomax, nDiso, Ddelmin, Ddelmax, nDdel):
+    def __init__(self, Disomin, Disomax, nDiso, Ddelmin, Ddelmax, nDdel, T2_default=50.0):
+        self.T2_default = T2_default          # ms, fixed T2 for every compartment (no T2 axis here)
         self.nDiso, self.nDdel = nDiso, nDdel
         self.Diso_vals = np.linspace(Disomin, Disomax, nDiso)
         self.Ddel_vals = np.linspace(Ddelmin, Ddelmax, nDdel)
@@ -81,7 +99,7 @@ class DTDModel(SignalModel):
         
         alpha = 3 * b * self.Diso * beta * self.Ddel + eps  
         sqrt_alpha = np.emath.sqrt(alpha)
-        return np.exp(-b * self.Diso) * np.exp(alpha / 3) * np.sqrt(np.pi) / 2 * np.real(erf(sqrt_alpha) / sqrt_alpha)
+        return np.exp(-b * self.Diso) * np.exp(alpha / 3) * np.sqrt(np.pi) / 2 * np.real(erf(sqrt_alpha) / sqrt_alpha) * self.t2_factor(acq)
 
 
 
@@ -97,8 +115,13 @@ class DTDT2Model(DTDModel):
         self.labels = ("Diso (µm²/ms)", "Ddel", "T2 (ms)")      # one label per axis, in grid order
 
     def A(self, acq):
-        TE = np.asarray(acq["TE"], dtype=float)[:, None]
-        return super().A(acq) * np.exp(-TE / self.T2)            # DTD kernel x T2 decay
+        b = np.asarray(acq["b"], dtype=float)[:, None]
+        beta = np.asarray(acq["beta"], dtype=float)[:, None]
+        eps = 1e-7  
+        
+        alpha = 3 * b * self.Diso * beta * self.Ddel + eps  
+        sqrt_alpha = np.emath.sqrt(alpha)
+        return np.exp(-b * self.Diso) * np.exp(alpha / 3) * np.sqrt(np.pi) / 2 * np.real(erf(sqrt_alpha) / sqrt_alpha) * self.t2_factor(acq)
 
  
  

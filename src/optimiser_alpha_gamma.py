@@ -281,6 +281,29 @@ def initialize_M0_from_b0(Y, A, b_values=None, b_tolerance=0.05):
         M0[voxel] = amplitudes.sum()
     return M0
 
+def initialize_S0_linear(Y, model, acq):
+    """One TE: fit the beta = 1 rows with the model, then predict the signal at b = 0 (= S0)."""
+    b = np.asarray(acq["b"], dtype=float).ravel()
+    if "beta" in acq:
+        lin = np.isclose(np.asarray(acq["beta"], dtype=float).ravel(), 1.0)   # linear-encoding rows only
+    else:
+        lin = np.ones(b.size, dtype=bool)                                     # model has no beta: use all rows
+
+    A_lin = model.A(acq)[lin]
+
+    # the same acquisition, but at b = 0
+    acq_b0 = {"b": [0.0], "beta": [1.0],
+              "TE": [np.asarray(acq["TE"], dtype=float).ravel()[0]]}
+    A_b0 = model.A(acq_b0)                                                    # 1 row: the model at b = 0
+
+    S0 = np.empty(Y.shape[1])
+    for voxel in range(Y.shape[1]):
+        amplitudes, _ = nnls(A_lin, Y[lin, voxel])
+        S0[voxel] = (A_b0 @ amplitudes)[0]
+    return S0
+
+
+
 
 def initialize_M0_monoexponential(Y, b_values, TE_values, b_tolerance=0.05):
     """Estimate M0 from a mono-exponential fit to near-b=0 multi-TE data."""
