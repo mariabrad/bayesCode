@@ -678,17 +678,14 @@ def project_C_to_C_small(C, s, V_mat):
     return (s[:, np.newaxis] * V_mat.T) @ C
 
 def define_initial_C_grid(Y, A, voxel_idx, K, axes, seed=0,
-                          return_diagnostics=False, min_fraction=0.0, allowed=None):
-    """Same as define_initial_C_NNLS, but for any grid. axes = list of 1D grid axes, e.g. [D_vals, T2_vals].
-    allowed = optional boolean mask over grid cells; NNLS only uses those cells (the rest get 0)."""
+                          return_diagnostics=False, min_fraction=0.0):
+    """Same as define_initial_C_NNLS, but for any grid. axes = list of 1D grid axes, e.g. [D_vals, T2_vals]."""
     axes = [np.asarray(a, dtype=float) for a in axes]
     shape = tuple(a.size for a in axes)
-    allowed = np.ones(A.shape[1], bool) if allowed is None else np.asarray(allowed, bool).ravel()
 
     spectra = []
     for v in voxel_idx:
-        f = np.zeros(A.shape[1])
-        f[allowed], _ = _solve_nnls(A[:, allowed], Y[:, v])
+        f, _ = _solve_nnls(A, Y[:, v])
         spectra.append(f / f.sum() if f.sum() > 0 else f)
     tissue_spectrum = np.mean(spectra, axis=0)
     tissue_spectrum /= tissue_spectrum.sum()

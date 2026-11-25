@@ -101,10 +101,6 @@ class DTDModel(SignalModel):
         sqrt_alpha = np.emath.sqrt(alpha)
         return np.exp(-b * self.Diso) * np.exp(alpha / 3) * np.sqrt(np.pi) / 2 * np.real(erf(sqrt_alpha) / sqrt_alpha) * self.t2_factor(acq)
 
-    def initial_C(self, Y, A, K, **kwargs):
-        "Same as the default, but NNLS only uses grid cells with Ddel > 0"
-        return define_initial_C_grid(Y, A, range(Y.shape[1]), K, self.axes,
-                                     allowed=self.Ddel > 0, **kwargs)
 
 
 class DTDT2Model(DTDModel):
